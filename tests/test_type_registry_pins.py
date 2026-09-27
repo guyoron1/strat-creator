@@ -22,6 +22,10 @@ Retired (the consumer reads the registry now, so the pin would be a tautology):
     Cloners helpers (:251 link_type, :256 key prefix), find_processed_rfe_ids strat_project (:287)
     and the strip_metadata title regex (:1028-1052, never pinned here). Their equality with the
     4c6ae1c literals is now tests/test_type_registry.py::test_jira_utils_derives_the_4c6ae1c_literals.
+  * The intake gate: jira_utils renders it from inputs[0].gate / discovery (render_intake_jql); the
+    JQL's equality with the 4c6ae1c text is tests/test_type_registry.py::test_intake_jql_is_the_4c6ae1c_text.
+    config/pipeline-settings.yaml keeps the same lists for strategy-create Step 2a (#79);
+    test_discovery_settings keeps the two equal until one of them is the single source.
 """
 
 import hashlib
@@ -53,6 +57,7 @@ SCHEMAS = artifact_utils.SCHEMAS
 def src(rel):
     return (REPO / rel).read_text(encoding="utf-8")
 
+SETTINGS = yaml.safe_load((REPO / "config" / "pipeline-settings.yaml").read_text(encoding="utf-8"))
 
 def pin(descriptor_value, live_value, where):
     assert descriptor_value == live_value, (
@@ -137,20 +142,26 @@ def test_lock_labels():
     pin(set(lock["derived_blocking_labels"]), set(lock_issues.STRAT_BLOCKING_LABELS), "pipeline.lock.derived_blocking_labels — lock_issues.py:53-56")
 
 
-# ── inputs[0] + discovery vs jira_utils ──────────────────────────────────────────────────
+# ── inputs[0] + discovery vs config/pipeline-settings.yaml and jira_utils ─────────────────
 
 
-def test_jql_builder_renders_the_descriptor_gate():
-    jql = jira_utils.build_jql_from_config(str(REPO / "config" / "pipeline-settings.yaml"))
-    gate = D.get("inputs.0.gate")
-    for label in gate["any_of"][0]["labels_any"] + gate["labels_any"] + gate["labels_not"]:
-        assert f'"{label}"' in jql, f"jira_utils.py:200-242 renders {label!r}"
-    for status in gate["statuses_not"]:
-        assert f'"{status}"' in jql
-    for version in gate["any_of"][1]["fields"]["customfield_10855"]["name_in"]:
-        assert f'"{version}"' in jql
-    field_id = "customfield_10855"
-    assert f"cf[{field_id[len('customfield_'):]}]" in jql, "jira_utils.py:219 cf[10855]"
+def test_discovery_settings():
+    jql = SETTINGS["jql"]
+    pin(D.get("inputs.0.jira.project"), jql["project"], "inputs.0.jira.project — pipeline-settings.yaml:3")
+    pin(D.get("inputs.0.gate.any_of.0.labels_any"), jql["required_labels"], "inputs.0.gate.any_of.0 — pipeline-settings.yaml:4-7")
+    pin(D.get("inputs.0.gate.any_of.1.fields.customfield_10855.name_in"), jql["target_versions"], "inputs.0.gate.any_of.1 — pipeline-settings.yaml:9-42")
+    pin(D.get("inputs.0.gate.labels_any"), jql["quality_labels"], "inputs.0.gate.labels_any — pipeline-settings.yaml:43-45")
+    pin(D.get("inputs.0.gate.labels_not"), jql["excluded_labels"], "inputs.0.gate.labels_not — pipeline-settings.yaml:46-47")
+    pin(D.get("inputs.0.gate.statuses_not"), jql["excluded_statuses"], "inputs.0.gate.statuses_not — pipeline-settings.yaml:48-51")
+    pin(D.get("discovery.order_by"), jql["order_by"], "discovery.order_by — pipeline-settings.yaml:52")
+    pin(D.get("discovery.batch_size"), SETTINGS["batch_size"], "discovery.batch_size — pipeline-settings.yaml:54")
+    pin(D.get("inputs.0.skip_if.labels_any"), SETTINGS["skip_labels"], "inputs.0.skip_if.labels_any — pipeline-settings.yaml:57-60")
+    pin(D.get("inputs.0.skip_if.statuses"), SETTINGS["excluded_strat_statuses"], "inputs.0.skip_if.statuses — pipeline-settings.yaml:64-69")
+
+
+def test_settings_file_is_a_projection_of_the_gate():
+    """Both doors render the same JQL: list-rfe-ids reads the descriptor, strategy-create reads the file (#79)."""
+    pin(jira_utils.build_jql_from_type(D), jira_utils.build_jql_from_config(str(REPO / "config" / "pipeline-settings.yaml")), "config/pipeline-settings.yaml == inputs.0.gate + discovery")
 
 
 def test_processed_lookup_override_rule():

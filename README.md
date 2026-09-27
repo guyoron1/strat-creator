@@ -48,7 +48,7 @@ See [Human Review Guide](docs/human-review-guide.md) for the full walkthrough.
 
 The pipeline supports two modes for selecting which RFEs to process:
 
-1. **JQL mode** (`--jql-default` or `--jql`): Queries Jira directly using labels and statuses defined in `config/pipeline-settings.yaml`. Handles batching and pre-filtering automatically.
+1. **JQL mode** (`--jql-default` or `--jql`): Queries Jira through the work type's intake gate, `types/rfe-strategy/type.yaml` (`inputs[0].gate`, `inputs[0].skip_if`, `discovery`; `--type` picks the type, default `rfe-strategy`). Handles batching and pre-filtering automatically.
 2. **Config file mode** (`--config`): Reads RFE IDs from a manually curated YAML batch file.
 
 ### JQL Pre-Filtering
@@ -64,8 +64,8 @@ In JQL mode, RFEs go through a two-stage filter before reaching the skills:
 
 **Stage 2 — Pre-filter (before batching):**
 Queries RHAISTRAT to find RFEs that already have processed or active strategies, then removes them so batch slots aren't wasted. An RFE is excluded if any of its STRATs (via Cloners links):
-- Have a skip label: `strat-creator-rubric-pass` or `strat-creator-needs-attention`
-- Are in an active/completed status: `In Progress`, `Review`, `Refinement`, `Release Pending`, `Closed`, `Resolved`
+- Have a skip label: `strat-creator-rubric-pass`, `strat-creator-needs-attention` or `strat-creator-processing`
+- Are in an active/completed status: `In Progress`, `Review`, `Release Pending`, `Closed`, `Resolved`
 
 After both stages, the first `batch_size` (default 10) remaining RFEs are selected.
 
@@ -83,7 +83,7 @@ Use `--include-processed` to bypass pre-filtering when needed.
 
 ### Configuration
 
-All filter parameters are externalized in `config/pipeline-settings.yaml` — no hardcoded labels in code.
+All filter parameters live in the work type descriptor, `types/rfe-strategy/type.yaml`, which `list-rfe-ids.py` reads — no hardcoded labels in code. `config/pipeline-settings.yaml` carries the same lists for the create skill and is kept equal by test: change both together.
 
 ```bash
 # List all matching RFEs
@@ -144,7 +144,7 @@ strat-creator/
 │   └── agents/                 # Agent definitions
 │       └── strat-scorer.md         # Restricted scorer agent
 ├── config/                 # Pipeline config and batch files
-│   ├── pipeline-settings.yaml  # JQL filters, batch size, skip labels, excluded statuses
+│   ├── pipeline-settings.yaml  # same gate lists as types/rfe-strategy/type.yaml (kept equal by test); read by strategy-create
 │   ├── road-to-production/     # Road-to-production batch YAML files
 │   ├── engineering35-batches/  # Engineering 3.5 batch YAML files
 │   ├── jen-batches/            # Jen batch files for dry runs

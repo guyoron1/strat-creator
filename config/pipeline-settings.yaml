@@ -1,4 +1,6 @@
-# Pipeline-level settings for JQL-based RFE discovery
+# The same gate lists as types/rfe-strategy/type.yaml (inputs[0].gate, inputs[0].skip_if, discovery), kept equal by
+# tests/test_type_registry_pins.py: strategy-create Step 2a reads this file (#79), list-rfe-ids.py --jql-default reads
+# the descriptor. Change both together until one of them is the single source (AISDLC-60).
 jql:
   project: RHAIRFE
   required_labels:

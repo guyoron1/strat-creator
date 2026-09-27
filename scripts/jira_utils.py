@@ -25,8 +25,8 @@ import type_registry  # sibling module: scripts/ is on sys.path wherever jira_ut
 # The work-item type whose values this module reads: the default, rfe-strategy (today's only
 # production type). Every _TYPE read below used to
 # be a literal here; tests/test_type_registry_pins.py pins the ones that still are.
-# For now: one module-wide type; a function takes a descriptor once a caller runs another type
-# (the entry script resolves it with type_registry.resolve).
+# For now: one module-wide default; build_jql_from_type and find_processed_rfe_ids take another
+# type's descriptor (list-rfe-ids.py --type), the rest follows when a caller needs it.
 _TYPE = type_registry.load().get(type_registry.LEGACY_DEFAULT_TYPE)
 
 ssl_ctx = ssl.create_default_context()
@@ -206,60 +206,91 @@ def query_label_counts(server, user, token, labels):
     return counts
 
 
+def render_intake_jql(project, gate, order_by):
+    """The intake JQL from the descriptor's vocabulary: ``inputs[0].jira.project``, ``inputs[0].gate``
+    and ``discovery.order_by``. ``gate.any_of`` alternatives are OR'd — each ``{labels_any: [...]}`` or
+    ``{fields: {customfield_N: {name_in: [...]}}}`` — then ``labels_all``, ``labels_any`` (at least
+    one), ``labels_not`` (locks; issues with no labels pass) and ``statuses_not``. Clause order and
+    spelling are the text main produced at 4c6ae1c. This is the one renderer, and
+    build_jql_from_config adapts the legacy settings file onto it.
+    """
+    clauses = [f"project = {project}"]
+    alternatives = []
+    for alt in gate.get("any_of") or []:
+        if alt.get("labels_any"):
+            alternatives.append(" OR ".join(f'labels = "{label}"' for label in alt["labels_any"]))
+        for field_id, spec in (alt.get("fields") or {}).items():
+            if spec.get("name_in"):
+                names_csv = ", ".join(f'"{name}"' for name in spec["name_in"])
+                alternatives.append(f"cf[{field_id[len('customfield_'):]}] in ({names_csv})")
+    if len(alternatives) > 1:
+        clauses.append("(" + " OR ".join(alternatives) + ")")
+    elif alternatives:
+        clauses.append(f"({alternatives[0]})" if " OR " in alternatives[0] else alternatives[0])
+    for label in gate.get("labels_all") or []:
+        clauses.append(f'labels = "{label}"')
+    if gate.get("labels_any"):
+        clauses.append("(" + " OR ".join(f'labels = "{label}"' for label in gate["labels_any"]) + ")")
+    if gate.get("labels_not"):
+        labels_csv = ", ".join(f'"{label}"' for label in gate["labels_not"])
+        clauses.append(f"(labels NOT IN ({labels_csv}) OR labels IS EMPTY)")
+    if gate.get("statuses_not"):
+        status_csv = ", ".join(f'"{s}"' for s in gate["statuses_not"])
+        clauses.append(f"status NOT IN ({status_csv})")
+    jql = " AND ".join(clauses)
+    if order_by:
+        jql += f" ORDER BY {order_by}"
+    return jql
+
+
+def build_jql_from_type(descriptor=None):
+    """The intake JQL of ``descriptor``, default rfe-strategy."""
+    d = descriptor or _TYPE
+    return render_intake_jql(
+        d.get("inputs.0.jira.project"), d.get("inputs.0.gate"), d.get("discovery.order_by"))
+
+
+# The legacy settings file never named its version field; it was always Target Version.
+_LEGACY_VERSION_FIELD = "customfield_10855"
+
+
 def build_jql_from_config(config_path):
-    """Build a JQL query string from pipeline-settings.yaml."""
+    """Adapt a ``pipeline-settings.yaml`` (its ``jql:`` block) onto render_intake_jql; keys it omits
+    fall back to rfe-strategy's descriptor. For callers that pass a settings path; the shipped
+    config/pipeline-settings.yaml carries the same lists as the descriptor, kept equal by
+    tests/test_type_registry_pins.py."""
     import yaml
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
     jql_cfg = cfg.get("jql", {})
-    project = jql_cfg.get("project", _TYPE.get("inputs.0.jira.project"))
-    required = jql_cfg.get("required_labels", [])
-    target_versions = jql_cfg.get("target_versions", [])
-    quality = jql_cfg.get("quality_labels", [])
-    excluded_labels = jql_cfg.get("excluded_labels", [])
-    excluded = jql_cfg.get("excluded_statuses", [])
-    order = jql_cfg.get("order_by", _TYPE.get("discovery.order_by"))
-
-    clauses = [f'project = {project}']
-    label_clause = " OR ".join(f'labels = "{label}"' for label in required)
-    version_clause = ""
-    if target_versions:
-        versions_csv = ", ".join(f'"{v}"' for v in target_versions)
-        version_clause = f'cf[10855] in ({versions_csv})'
-    if label_clause and version_clause:
-        clauses.append(f'({label_clause} OR {version_clause})')
-    elif label_clause:
-        if len(required) > 1:
-            clauses.append(f'({label_clause})')
-        else:
-            clauses.append(label_clause)
-    elif version_clause:
-        clauses.append(version_clause)
-    if quality:
-        quality_clause = " OR ".join(f'labels = "{label}"' for label in quality)
-        clauses.append(f'({quality_clause})')
-    if excluded_labels:
-        labels_csv = ", ".join(f'"{label}"' for label in excluded_labels)
-        clauses.append(f'(labels NOT IN ({labels_csv}) OR labels IS EMPTY)')
-    if excluded:
-        status_clause = ", ".join(f'"{s}"' for s in excluded)
-        clauses.append(f'status NOT IN ({status_clause})')
-
-    jql = " AND ".join(clauses)
-    if order:
-        jql += f" ORDER BY {order}"
-    return jql
+    any_of = []
+    if jql_cfg.get("required_labels"):
+        any_of.append({"labels_any": jql_cfg["required_labels"]})
+    if jql_cfg.get("target_versions"):
+        any_of.append({"fields": {_LEGACY_VERSION_FIELD: {"name_in": jql_cfg["target_versions"]}}})
+    gate = {
+        "any_of": any_of,
+        "labels_any": jql_cfg.get("quality_labels", []),
+        "labels_not": jql_cfg.get("excluded_labels", []),
+        "statuses_not": jql_cfg.get("excluded_statuses", []),
+    }
+    return render_intake_jql(
+        jql_cfg.get("project", _TYPE.get("inputs.0.jira.project")),
+        gate,
+        jql_cfg.get("order_by", _TYPE.get("discovery.order_by")),
+    )
 
 
-def _linked_input_key(link):
+def _linked_input_key(link, desc=None):
     """The input-side key on one issue link of the descriptor's relation type, else None.
 
     Both link directions are searched (inputs[0].relation.direction is advisory; the live data
-    has links created from either side).
+    has links created from either side). ``desc`` is the work type, default rfe-strategy.
     """
-    if link.get("type", {}).get("name") != _TYPE.get("inputs.0.relation.link_type"):
+    d = desc or _TYPE
+    if link.get("type", {}).get("name") != d.get("inputs.0.relation.link_type"):
         return None
-    prefix = _TYPE.get("inputs.0.jira.key_prefixes.0")
+    prefix = d.get("inputs.0.jira.key_prefixes.0")
     for side in ("outwardIssue", "inwardIssue"):
         key = (link.get(side) or {}).get("key", "")
         if key.startswith(prefix):
@@ -267,27 +298,27 @@ def _linked_input_key(link):
     return None
 
 
-def _linked_input_keys(issues):
+def _linked_input_keys(issues, desc=None):
     for issue in issues:
         for link in issue.get("fields", {}).get("issuelinks", []):
-            key = _linked_input_key(link)
+            key = _linked_input_key(link, desc)
             if key:
                 yield key
 
 
-def _extract_rfe_keys_from_issues(issues):
+def _extract_rfe_keys_from_issues(issues, desc=None):
     """Input (source) keys linked from a list of this type's issues."""
-    return set(_linked_input_keys(issues))
+    return set(_linked_input_keys(issues, desc))
 
 
-def _count_rfe_clones_from_issues(issues):
+def _count_rfe_clones_from_issues(issues, desc=None):
     """Count this type's issues per input key, one per relation link."""
-    return collections.Counter(_linked_input_keys(issues))
+    return collections.Counter(_linked_input_keys(issues, desc))
 
 
 def find_processed_rfe_ids(server, user, token, skip_labels,
                            excluded_strat_statuses=None,
-                           strat_project=_TYPE.get("identity.jira.project")):
+                           strat_project=None, desc=None):
     """Find RHAIRFE IDs that should be excluded from batching.
 
     Excludes RFEs whose RHAISTRAT clones either:
@@ -299,7 +330,17 @@ def find_processed_rfe_ids(server, user, token, skip_labels,
     is un-excluded so the replacement clone can be processed. This
     handles the case where an old clone was closed/rejected and a new
     one was created as a replacement.
+
+    ``desc`` is the work type (default rfe-strategy): ``strat_project`` defaults to its
+    identity.jira.project and its inputs[0].relation is the link walked.
+    For now: a clones relation only; any other relation is refused before Jira is queried, until
+    that type's "already processed" rule is decided.
     """
+    d = desc or _TYPE
+    if d.get("inputs.0.relation.kind") != "clones":
+        raise ValueError(f"{d.name}: the already-processed check follows a clones relation, not "
+                         f"{d.get('inputs.0.relation.kind')!r}; pass --include-processed")
+    strat_project = strat_project or d.get("identity.jira.project")
     processed = set()
 
     if skip_labels:
@@ -307,14 +348,14 @@ def find_processed_rfe_ids(server, user, token, skip_labels,
         jql = f"project = {strat_project} AND ({label_clause})"
         issues = search_issues(server, user, token, jql,
                                fields=["issuelinks"])
-        processed |= _extract_rfe_keys_from_issues(issues)
+        processed |= _extract_rfe_keys_from_issues(issues, d)
 
     if excluded_strat_statuses:
         status_clause = ", ".join(f'"{s}"' for s in excluded_strat_statuses)
         jql = f"project = {strat_project} AND status IN ({status_clause})"
         issues = search_issues(server, user, token, jql,
                                fields=["issuelinks"])
-        processed |= _extract_rfe_keys_from_issues(issues)
+        processed |= _extract_rfe_keys_from_issues(issues, d)
 
     if processed and excluded_strat_statuses:
         sc = ", ".join(f'"{s}"' for s in excluded_strat_statuses)
@@ -322,7 +363,7 @@ def find_processed_rfe_ids(server, user, token, skip_labels,
                     f"AND status NOT IN ({sc})")
         open_issues = search_issues(server, user, token, open_jql,
                                     fields=["issuelinks", "labels"])
-        open_counts = _count_rfe_clones_from_issues(open_issues)
+        open_counts = _count_rfe_clones_from_issues(open_issues, d)
 
         unlabeled_rfes = set()
         if skip_labels:
@@ -335,7 +376,7 @@ def find_processed_rfe_ids(server, user, token, skip_labels,
                 ) & skip_set)
             ]
             unlabeled_rfes = _extract_rfe_keys_from_issues(
-                truly_unlabeled)
+                truly_unlabeled, d)
         else:
             unlabeled_rfes = set(open_counts)
 

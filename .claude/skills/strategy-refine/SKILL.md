@@ -66,7 +66,7 @@ Read the strategy's frontmatter to get the `jira_key`. If `jira_key` is not null
 python3 ${CLAUDE_SKILL_DIR}/scripts/fetch_issue.py RHAISTRAT-NNNN --fields labels --markdown
 ```
 
-If the STRAT has either `strat-creator-rubric-pass` or `strat-creator-needs-attention` in its labels, **stop** — it has already been processed by the pipeline:
+If the STRAT has either `strat-creator-rubric-pass` or `strat-creator-needs-attention` (the type's `conventions.labels.rubric_pass` / `needs_attention`) in its labels, **stop** — it has already been processed by the pipeline:
 - Do NOT refine it
 - Print `[SKIP] RHAISTRAT-NNNN — already has <label>, skipping refinement`
 
