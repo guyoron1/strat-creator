@@ -110,6 +110,7 @@ class TestPullWithRubricPass:
         assert data["status"] == "Refined"
         assert data["workflow"] == "local"
         assert data["title"] == "GPU time-slicing strategy"
+        assert data["type"] == "rfe-strategy"
 
 
 class TestPullWithNeedsAttention:
