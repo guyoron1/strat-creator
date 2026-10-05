@@ -843,7 +843,7 @@
     },
     "input": {
       "type": "object",
-      "required": ["from_type", "relation", "source_ref_field"],
+      "required": ["from_type", "relation", "source_ref_field", "gate"],
       "additionalProperties": false,
       "properties": {
         "from_type": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$", "description": "Upstream type name (may be a peer pipeline's type, not necessarily registered here)." },
@@ -899,7 +899,7 @@
               }
             }
           },
-          "description": "Upstream readiness gate, evaluated by the CONSUMING pipeline (rfe-creator ships no evaluator)."
+          "description": "Upstream readiness gate, evaluated by the CONSUMING pipeline (rfe-creator ships no evaluator). strat-creator: required, because list-rfe-ids.py --jql-default --type renders it as the type's intake JQL (jira_utils.render_intake_jql)."
         },
         "body_source": {
           "type": "object",
