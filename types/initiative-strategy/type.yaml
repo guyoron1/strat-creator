@@ -39,8 +39,8 @@ inputs:
       kind: self                                        # open question (see header); the alternative is `clones` plus a target binding
     source_ref_field: source_initiative
     gate:                                               # the intake gate jira_utils.render_intake_jql renders; list-rfe-ids.py --jql-default --type initiative-strategy
-      labels_any: [initiative-autofix-rubric-pass, tech-reviewed]   # [0] = rfe-creator initiative conventions.labels.rubric_pass, its PUBLISHED CONTRACT (R7); open question: does tech-reviewed apply to Initiatives
-      labels_all: []
+      labels_any: [initiative-autofix-rubric-pass]      # rfe-creator initiative conventions.labels.rubric_pass, its PUBLISHED CONTRACT (R7): rubric-passed Initiatives only; tech-reviewed is not accepted (no Initiative job sets it)
+      labels_all: []                                    # the opt-in label an Initiative owner sets goes here once AISDLC-205 names it
       labels_not: [strat-creator-processing]            # the lock (pipeline.lock.label), same label as rfe-strategy
       statuses_not: [Closed, Resolved]                  # open question: RHOAIENG's workflow states (rfe-strategy also excludes Draft)
       any_of: []                                        # no release-label / Target Version gating for Initiatives — open question
