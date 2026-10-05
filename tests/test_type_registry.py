@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -375,8 +376,11 @@ def test_processed_check_refuses_a_non_clones_relation(tmp_path, monkeypatch):
 
 def test_review_consumers_equal_the_4c6ae1c_values():
     """What artifact_utils, lock_issues, apply_scores and remove_draft_prefix carried as literals on
-    main at 4c6ae1c, now derived from the descriptor: same values, same field order."""
+    main at 4c6ae1c, now derived from the descriptor: same values, same field order. The one field
+    added since is strat-task's self-describing `type`, appended last with no default (test_type_stamp)."""
     frozen = json.loads((REPO / "tests" / "fixtures" / "strat-schemas-4c6ae1c.json").read_text(encoding="utf-8"))
+    frozen["strat-task"]["type"] = {"type": "string", "required": False, "enum": [SHIPPED]}
+    frozen["order"]["strat-task"].append("type")
     for name in ("strat-task", "strat-review"):
         assert artifact_utils.SCHEMAS[name] == frozen[name], name
         assert list(artifact_utils.SCHEMAS[name]) == frozen["order"][name], f"{name} field order"
@@ -402,6 +406,35 @@ def test_review_consumers_equal_the_4c6ae1c_values():
     assert columns == ["Feasibility", "Testability", "Scope", "Architecture"]
     assert apply_scores.TOTAL_FIELD == "total" and apply_scores.MAX_TOTAL == 8
     assert os.path.normpath(apply_scores.REVIEW_DIR_DEFAULT) == str(REPO / "artifacts" / "strat-reviews")
+
+
+def test_type_stamp(tmp_path):
+    """rfe-creator PR 184's self-describing `type`, on strategy task files: written only when a writer
+    passes it (no default, no back-fill), appended after the fields given, refused when it names
+    another type, read by resolve()'s frontmatter rung, and stripped with the frontmatter before a
+    push, so nothing new reaches Jira."""
+    new_task = ["strat_id=RHAISTRAT-500", "title=New strat", "source_rfe=RHAIRFE-101",
+                "jira_key=RHAISTRAT-500", "priority=Major", "status=Draft"]  # strategy-create's set
+
+    def fm_set(where, *fields):
+        path = tmp_path / where / "strat-tasks" / "RHAISTRAT-500.md"
+        argv = [sys.executable, str(REPO / "scripts" / "frontmatter.py"), "set", str(path), *fields]
+        return path, subprocess.run(argv, capture_output=True, text=True)
+
+    plain, run = fm_set("plain", *new_task)
+    assert run.returncode == 0, run.stderr
+    typed, run = fm_set("typed", *new_task, f"type={SHIPPED}")
+    assert run.returncode == 0, run.stderr
+    before = plain.read_text(encoding="utf-8")
+    stamped = typed.read_text(encoding="utf-8")
+    assert "type:" not in before
+    assert stamped == before.replace("status: Draft\n", f"status: Draft\ntype: {SHIPPED}\n", 1)
+    for other in (TWIN, "bogus"):
+        _, run = fm_set("typed", f"type={other}")
+        assert run.returncode == 1 and f"type: '{other}' not in ['{SHIPPED}']" in run.stderr, other
+    assert typed.read_text(encoding="utf-8") == stamped
+    assert type_registry.resolve(REG, artifact=typed, env={"CI": "true"}).rung == "frontmatter type"
+    assert jira_utils.strip_metadata(stamped) == jira_utils.strip_metadata(before)
 
 
 def test_strat_schemas_follow_a_drop_in_type(tmp_path):

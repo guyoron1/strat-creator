@@ -262,3 +262,4 @@ def test_create_skill_binding_prose():
     # #79 (2026-10-04): Step 2a reads the gate lists from config/pipeline-settings.yaml and carries no copy.
     gate_values = D.get("inputs.0.gate.any_of.0.labels_any") + D.get("inputs.0.gate.labels_any")
     assert "config/pipeline-settings.yaml" in create and not [v for v in gate_values if v in create], "strategy-create/SKILL.md Step 2a"
+    assert create.count(f"    type={D.name}\n") == 2, "strategy-create/SKILL.md: both strat-tasks set blocks stamp the type"

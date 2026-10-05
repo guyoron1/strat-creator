@@ -201,6 +201,7 @@ def pull_strategy(server, user, token, strat_key, local_dir=WORKSPACE):
         "priority": priority,
         "status": "Refined",
         "workflow": "local",
+        "type": _TYPE.name,
     }
     write_frontmatter(strat_path, frontmatter, "strat-task")
 
