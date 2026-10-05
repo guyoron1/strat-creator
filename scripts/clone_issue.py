@@ -19,6 +19,7 @@ Environment variables:
 import argparse
 import sys
 
+import type_registry
 from jira_utils import (
     create_issue,
     create_issue_link,
@@ -26,6 +27,19 @@ from jira_utils import (
     get_project_versions,
     require_env,
 )
+
+# The default work type, rfe-strategy: the issue type a clone gets, the fields it copies, the
+# parent gate, the [DRAFT] prefix, the lock label it drops and the link it creates.
+# For now: one type; resolve per call from source_key (type_registry.resolve(ids=[source_key]))
+# once a second clones type ships. A self relation (initiative-strategy) must never clone; nothing
+# enforces that yet.
+_TYPE = type_registry.load().get(type_registry.LEGACY_DEFAULT_TYPE)
+_PARENT = _TYPE.get("inputs.0.parent_gate")
+ISSUE_TYPE = _TYPE.get("identity.jira.issue_type")
+COPY_FIELDS = _TYPE.get("inputs.0.copy_fields")
+DRAFT_PREFIX = _TYPE.get("conventions.summary_prefix.value")
+LOCK_LABEL = _TYPE.get("pipeline.lock.label")
+LINK_TYPE = _TYPE.get("inputs.0.relation.link_type")
 
 
 def _resolve_parent_outcome(server, user, token, source_fields):
@@ -40,7 +54,7 @@ def _resolve_parent_outcome(server, user, token, source_fields):
         print("Source parent key is missing or invalid, skipping.",
               file=sys.stderr)
         return None
-    if not parent_key.startswith("RHAISTRAT-"):
+    if not parent_key.startswith(tuple(_PARENT["key_prefixes"])):
         print(f"Source parent {parent_key} is not a RHAISTRAT Outcome, skipping.",
               file=sys.stderr)
         return None
@@ -55,13 +69,13 @@ def _resolve_parent_outcome(server, user, token, source_fields):
 
     parent_fields = parent_issue.get("fields", {})
     issue_type = parent_fields.get("issuetype", {}).get("name", "")
-    if issue_type != "Outcome":
+    if issue_type != _PARENT["issue_type"]:
         print(f"Source parent {parent_key} is type '{issue_type}', not Outcome. Skipping.",
               file=sys.stderr)
         return None
 
     status = parent_fields.get("status", {}).get("name", "")
-    if status == "Closed":
+    if status in _PARENT["statuses_not"]:
         print(f"Source parent {parent_key} is Closed, skipping.",
               file=sys.stderr)
         return None
@@ -76,7 +90,7 @@ def main():
     parser.add_argument("source_key", help="Source issue key (e.g. RHAIRFE-1397)")
     parser.add_argument("--target-project", required=True,
                         help="Target project key (e.g. RHAISTRAT)")
-    parser.add_argument("--issue-type", default="Feature",
+    parser.add_argument("--issue-type", default=ISSUE_TYPE,
                         help="Issue type in target project (default: Feature)")
     args = parser.parse_args()
 
@@ -87,20 +101,18 @@ def main():
         sys.exit(2)
 
     source = get_issue(server, user, token, args.source_key,
-                       fields=["summary", "description", "priority", "labels",
-                               "components", "versions",
-                               "customfield_10855", "parent"])
+                       fields=COPY_FIELDS)
     fields = source.get("fields", {})
 
     summary = fields.get("summary", "")
-    if not summary.startswith("[DRAFT] "):
-        summary = f"[DRAFT] {summary}"
+    if not summary.startswith(DRAFT_PREFIX):
+        summary = f"{DRAFT_PREFIX}{summary}"
     description_adf = fields.get("description")
     priority_obj = fields.get("priority")
     priority = priority_obj.get("name", "Major") if isinstance(
         priority_obj, dict) else "Major"
     labels = [label for label in fields.get("labels", [])
-              if label != "strat-creator-processing"]
+              if label != LOCK_LABEL]
     components = [c["name"] for c in fields.get("components", [])
                   if isinstance(c, dict) and "name" in c]
     affects_versions = [v["name"] for v in fields.get("versions", [])
@@ -138,7 +150,7 @@ def main():
 
     # Cloners link: new issue "is cloned by" source (STRAT is the clone of the RFE)
     create_issue_link(server, user, token,
-                      type_name="Cloners",
+                      type_name=LINK_TYPE,
                       inward_key=new_key,
                       outward_key=args.source_key)
 
