@@ -24,7 +24,7 @@ identity:
     project: RHOAIENG                                   # open question (same ticket): the derived record IS the Initiative
     issue_type: Initiative                              # rfe-creator types/initiative/type.yaml identity.jira (its PUBLISHED binding)
     key_prefixes: ["RHOAIENG-"]
-  local_prefix: "ISTRAT-"                               # local drafts before a key exists; authored, no consumer yet
+  local_prefix: "ISTRAT-"                               # local drafts before a key exists; authored; the reporters glob it
   local_id_pattern: '^ISTRAT-\d+$'                      # ONE backslash
   id_field: strat_id
   tracker_key_field: jira_key
