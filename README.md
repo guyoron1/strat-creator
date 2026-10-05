@@ -83,7 +83,7 @@ Use `--include-processed` to bypass pre-filtering when needed.
 
 ### Configuration
 
-All filter parameters live in the work type descriptor, `types/rfe-strategy/type.yaml`, which `list-rfe-ids.py` reads — no hardcoded labels in code. `config/pipeline-settings.yaml` carries the same lists for the create skill and is kept equal by test: change both together.
+All filter parameters live in the work type descriptor, `types/rfe-strategy/type.yaml`, which `list-rfe-ids.py` reads — no hardcoded labels in code. Work types are described in [`types/README.md`](types/README.md); `--type` selects one (default `rfe-strategy`). `config/pipeline-settings.yaml` carries the same lists for the create skill and is kept equal by test: change both together.
 
 ```bash
 # List all matching RFEs
@@ -139,6 +139,7 @@ strat-creator/
 │   ├── assess-strat/                # In-repository scoring rubric and scripts
 │   ├── generate-report.py      # Per-run HTML report
 │   └── generate-dashboard.py   # Aggregate dashboard across runs
+├── types/                  # Work-item type descriptors (rfe-strategy, initiative-strategy) — see types/README.md
 ├── .claude/
 │   ├── skills/                 # Claude Code skills (pipeline steps + reviewers)
 │   └── agents/                 # Agent definitions
